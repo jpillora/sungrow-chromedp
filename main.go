@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -22,28 +23,42 @@ var config = struct {
 	NoHeadless  bool          `help:"disable headless mode"`
 	ShowNetwork bool          `help:"show network requests"`
 	Debug       bool          `help:"show chromedp actions"`
+	Screenshot  string        `help:"take a screenshot, and write it to this path"`
 }{
 	Portal:  `https://www.isolarcloud.com`,
 	Timeout: 30 * time.Second,
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 
 	opts.New(&config).Name(`sungrow-chromedp`).Version(version).Parse()
 	if config.Email == "" || config.Pass == "" {
 		log.Fatal("email and password are required")
 	}
 
-	ctx, cancel := chromedp.NewExecAllocator(
-		context.Background(),
+	// create a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
+	defer cancel()
+
+	ctx, cancel = chromedp.NewExecAllocator(
+		ctx,
 		chromedp.Flag("headless", !config.NoHeadless),
+		chromedp.Flag("remote-debugging-port", "9222"),
 	)
 	defer cancel()
 
 	copts := []chromedp.ContextOption{}
-	if config.Debug {
-		copts = append(copts, chromedp.WithDebugf(log.Printf))
-	}
+	copts = append(copts, chromedp.WithLogf(log.Printf))
+	copts = append(copts, chromedp.WithErrorf(log.Printf))
+	// copts = append(copts, chromedp.WithDebugf(log.Printf))
+	// if config.Debug {
+	// }
 	ctx, cancel = chromedp.NewContext(ctx, copts...)
 	defer cancel()
 
@@ -59,12 +74,18 @@ func main() {
 			}
 		})
 	}
-
-	// create a timeout
-	ctx, cancel = context.WithTimeout(ctx, config.Timeout)
-	defer cancel()
 	// result
 	var kwh string
+	var screenshot []byte
+	// optionally save it to file
+	if config.Screenshot != "" {
+		defer func() {
+			if len(screenshot) > 0 {
+				os.WriteFile(config.Screenshot, screenshot, 0644)
+				log.Printf("wrote screenshot to: %s", config.Screenshot)
+			}
+		}()
+	}
 	// navigate to a page, wait for an element, click
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(config.Portal),
@@ -77,13 +98,19 @@ func main() {
 		chromedp.Sleep(100*time.Millisecond),
 		chromedp.Evaluate(`const e = document.querySelector("#privacyLabel"); if(e) { e.click() }`, nil),
 		chromedp.Sleep(100*time.Millisecond),
+		chromedp.WaitVisible(`#login-btn`),
+		// chromedp.Submit(`#userAcct, #userPswd, #login-btn`),
 		chromedp.Click(`#login-btn`),
+		chromedp.Sleep(8*time.Second),
+		chromedp.CaptureScreenshot(&screenshot),
 		chromedp.WaitVisible(`.plant-data > .item:nth-child(2) > .data`),
 		chromedp.Text(`.plant-data > .item:nth-child(2) > .data`, &kwh),
+		chromedp.Sleep(time.Hour),
 	)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	kwh = strings.TrimSuffix(strings.TrimSpace(kwh), " kW")
 	fmt.Println(kwh)
+	return nil
 }
