@@ -67,7 +67,7 @@ func main() {
 	var kwh string
 	// navigate to a page, wait for an element, click
 	err := chromedp.Run(ctx,
-		chromedp.Navigate(`https://au.isolarcloud.com/`),
+		chromedp.Navigate(config.Portal),
 		chromedp.Sleep(100*time.Millisecond),
 		chromedp.WaitVisible(`#login-btn`),
 		chromedp.Sleep(100*time.Millisecond),
